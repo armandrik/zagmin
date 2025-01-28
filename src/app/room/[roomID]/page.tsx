@@ -190,29 +190,29 @@ export default function Room({
   };
 
   return (
-    <main className="p-4">
+    <main className="p-4 mobile:p-2">
       <h1 className="text-2xl font-bold mb-4 text-center">Room {roomID}</h1>
       {error ? (
         <div className="bg-red-100 text-red-700 p-4 rounded-lg shadow-md">
           <p>{error}</p>
         </div>
       ) : (
-        <div className="w-full flex flex-col items-center justify-start gap-4 p-4">
+        <div className="w-full flex flex-col items-center justify-start gap-4 p-4 mobile:p-2">
           <div className="flex items-center justify-center gap-4 w-full h-auto">
             <video
               ref={localVideoRef}
               autoPlay
               playsInline
-              className="w-1/2 min-h-[525px] transition-all border-2 border-zinc-700/50 rounded-lg scale-x-[-1]"
+              className="w-1/2 min-h-[525px] transition-all border-2 border-zinc-700/50 rounded-lg scale-x-[-1] mobile:w-full"
             />
             <video
               ref={shareScreenVideoRef}
               autoPlay
               playsInline
-              className="w-1/2 min-h-[525px] border-2 border-zinc-700/50 rounded-lg"
+              className="relative w-1/2 min-h-[525px] border-2 border-zinc-700/50 rounded-lg mobile:hidden"
             />
           </div>
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-4 mobile:gap-2">
             <button
               onClick={toggleVideo}
               className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -227,7 +227,7 @@ export default function Room({
             </button>
             <button
               onClick={isSharingScreen ? stopScreenSharing : shareScreen}
-              className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-700 mobile:hidden"
             >
               {isSharingScreen ? "Stop Sharing" : "Share Screen"}
             </button>
