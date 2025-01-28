@@ -11,6 +11,7 @@ export default function Room({
 }) {
   const router = useRouter();
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const shareScreenVideoRef = useRef<HTMLVideoElement>(null);
 
   const unwrappedParams = React.use(params);
   const { roomID } = unwrappedParams;
@@ -18,10 +19,11 @@ export default function Room({
   const [peerConnection, setPeerConnection] =
     useState<RTCPeerConnection | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [videoEnabled, setVideoEnabled] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
-  const [error, setError] = useState<string | null>(null); // To display error messages
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const setupWebRTC = async () => {
@@ -29,25 +31,23 @@ export default function Room({
         const pc = new RTCPeerConnection();
         setPeerConnection(pc);
 
-        // Attempt to get user media
+        // Capture camera and microphone
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true,
         });
 
-        // Disable video and audio tracks by default
+        // Disable video and audio by default
         stream.getVideoTracks().forEach((track) => (track.enabled = false));
         stream.getAudioTracks().forEach((track) => (track.enabled = false));
 
-        // Store the local stream
+        // Store and display the camera stream
         setLocalStream(stream);
-
-        // Display local stream
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
-        // Add local tracks to connection
+        // Add tracks to peer connection
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
         // Handle ICE candidates
@@ -56,18 +56,6 @@ export default function Room({
             console.log("New ICE candidate:", event.candidate);
           }
         };
-
-        // Simulate signaling with a remote peer
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        const remotePC = new RTCPeerConnection();
-        remotePC.ontrack = (event) => console.log("Remote track received");
-
-        await remotePC.setRemoteDescription(offer);
-        const answer = await remotePC.createAnswer();
-        await remotePC.setLocalDescription(answer);
-        await pc.setRemoteDescription(answer);
 
         console.log("Connection established!");
       } catch (err) {
@@ -100,52 +88,85 @@ export default function Room({
 
   const toggleAudio = () => {
     if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0];
-      audioTrack.enabled = !audioTrack.enabled;
-      setAudioEnabled(audioTrack.enabled);
+      const micTrack = localStream.getAudioTracks()[0];
+      micTrack.enabled = !micTrack.enabled;
+
+      // If screen sharing is active, apply the toggle to its audio as well
+      if (screenStream) {
+        const screenAudioTrack = screenStream.getAudioTracks()[0];
+        if (screenAudioTrack) {
+          screenAudioTrack.enabled = micTrack.enabled;
+        }
+      }
+
+      setAudioEnabled(micTrack.enabled);
     }
   };
 
   const shareScreen = async () => {
-    if (!isSharingScreen) {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+    try {
+      // Capture the screen with audio
+      const screen = await navigator.mediaDevices.getDisplayMedia({
         video: true,
+        audio: true,
       });
-      const screenTrack = screenStream.getVideoTracks()[0];
 
+      setScreenStream(screen);
+
+      // Display the screen-sharing stream locally
+      if (shareScreenVideoRef.current) {
+        shareScreenVideoRef.current.srcObject = screen;
+      }
+
+      // Add the screen video track to the connection
       if (peerConnection) {
-        const sender = peerConnection
-          .getSenders()
-          .find((s) => s.track?.kind === "video");
-        if (sender) sender.replaceTrack(screenTrack);
+        const screenTrack = screen.getVideoTracks()[0];
+        peerConnection.addTrack(screenTrack, screen);
+
+        // Preserve microphone audio in the connection
+        if (localStream) {
+          const micTrack = localStream.getAudioTracks()[0];
+          const audioSender = peerConnection
+            .getSenders()
+            .find((s) => s.track?.kind === "audio");
+
+          if (audioSender) {
+            audioSender.replaceTrack(micTrack);
+          } else {
+            peerConnection.addTrack(micTrack, localStream);
+          }
+        }
       }
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = screenStream;
-      }
+      // Stop screen sharing when the screen track ends
+      screen.getVideoTracks()[0].onended = stopScreenSharing;
 
-      screenTrack.onended = stopScreenSharing;
       setIsSharingScreen(true);
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        console.log("Screen sharing permission denied. No changes made.");
+      } else {
+        console.error("Error while attempting to share screen:", err);
+      }
     }
   };
 
   const stopScreenSharing = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (peerConnection) {
-        const sender = peerConnection
-          .getSenders()
-          .find((s) => s.track?.kind === "video");
-        if (sender) sender.replaceTrack(videoTrack);
+    if (screenStream) {
+      screenStream.getTracks().forEach((track) => track.stop());
+      setScreenStream(null);
+
+      // Clear the screen-sharing video element
+      if (shareScreenVideoRef.current) {
+        shareScreenVideoRef.current.srcObject = null;
       }
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = localStream;
-      }
+
       setIsSharingScreen(false);
     }
   };
 
   const leaveCall = () => {
+    // Stop all media tracks and clean up resources
     cleanupResources();
     router.push("/");
   };
@@ -154,32 +175,44 @@ export default function Room({
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
     }
+    if (screenStream) {
+      screenStream.getTracks().forEach((track) => track.stop());
+    }
     if (peerConnection) {
       peerConnection.close();
     }
     setPeerConnection(null);
     setLocalStream(null);
+    setScreenStream(null);
     setVideoEnabled(false);
     setAudioEnabled(false);
     setIsSharingScreen(false);
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gray-100 p-4">
-      <h1 className="text-2xl font-bold mb-4">Room {roomID}</h1>
+    <main className="p-4">
+      <h1 className="text-2xl font-bold mb-4 text-center">Room {roomID}</h1>
       {error ? (
         <div className="bg-red-100 text-red-700 p-4 rounded-lg shadow-md">
           <p>{error}</p>
         </div>
       ) : (
-        <div className="w-full h-dvh">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            className="border-2 mx-auto w-full"
-          />
-          <div className="flex items-center justify-center gap-4 mt-4">
+        <div className="w-full flex flex-col items-center justify-start gap-4 p-4">
+          <div className="flex items-center justify-center gap-4 w-full h-auto">
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              className="w-1/2 min-h-[525px] transition-all border-2 border-zinc-700/50 rounded-lg scale-x-[-1]"
+            />
+            <video
+              ref={shareScreenVideoRef}
+              autoPlay
+              playsInline
+              className="w-1/2 min-h-[525px] border-2 border-zinc-700/50 rounded-lg"
+            />
+          </div>
+          <div className="flex items-center justify-center gap-4">
             <button
               onClick={toggleVideo}
               className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
